@@ -1,0 +1,245 @@
+
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#050505">
+<title>СлайдЛаб</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#050505;color:#f2f2f2;font:16px system-ui,Arial,sans-serif}
+main{max-width:760px;margin:auto;padding:22px 16px 80px}
+h1{font-size:32px;margin:8px 0}
+p{color:#aaa;line-height:1.5}
+.panel,.slide{background:#141414;border:1px solid #303030;border-radius:18px;padding:18px;margin:16px 0}
+label{display:block;margin:14px 0 7px;font-weight:600}
+input,select,textarea{width:100%;padding:13px;color:#fff;background:#232323;border:1px solid #424242;border-radius:11px;font:inherit}
+textarea{min-height:110px;resize:vertical}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+button{display:block;width:100%;margin-top:12px;padding:15px;background:#ededed;color:#080808;border:0;border-radius:11px;font:inherit;font-weight:750;cursor:pointer}
+button:disabled{opacity:.5}
+.muted{color:#999;font-size:13px}
+.hint{background:#202020;border-left:3px solid #aaa;padding:12px;margin:15px 0}
+.slide .num{color:#999;font-size:13px;margin-bottom:5px}
+.slide textarea{margin-top:8px}
+.hide{display:none}
+#status{min-height:24px}
+details summary{cursor:pointer;font-weight:700}
+@media(max-width:390px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<h1>◼ СлайдЛаб</h1>
+<p>Создавай презентации PowerPoint прямо на телефоне.</p>
+
+<div class="panel">
+<label for="topic">Тема презентации</label>
+<input id="topic" placeholder="Например: История космонавтики">
+
+<div class="grid">
+<div>
+<label for="count">Количество слайдов</label>
+<input id="count" type="number" min="5" max="30" value="10">
+</div>
+<div>
+<label for="theme">Тема презентации</label>
+<select id="theme">
+<option value="night">Тёмная</option>
+<option value="paper">Светлая</option>
+</select>
+</div>
+</div>
+
+<details style="margin-top:22px">
+<summary>Подключение ИИ (позже)</summary>
+<p class="muted">После создания Cloudflare Worker здесь можно будет получать содержательные слайды от Gemini. API-ключ Google сюда не вводи.</p>
+<label for="worker">Адрес Cloudflare Worker</label>
+<input id="worker" type="url" placeholder="https://example.workers.dev">
+<label for="password">Пароль доступа к ИИ</label>
+<input id="password" type="password" autocomplete="off">
+</details>
+
+<button id="make">Создать слайды</button>
+<p id="status" role="status"></p>
+</div>
+
+<div id="result" class="hide">
+<div class="hint">Заголовки и тезисы можно редактировать. Без подключённого ИИ создаётся только черновой план.</div>
+<div id="slides"></div>
+<button id="download">Скачать PowerPoint (.pptx)</button>
+</div>
+<p class="muted">Для скачивания PowerPoint нужно подключение к интернету.</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const topics=[
+'Зачем это важно','Основные понятия','Исторический контекст',
+'Ключевые факты','Структура темы','Участники и роли',
+'Как это работает','Этапы развития','Главные особенности',
+'Реальный пример','Практическое применение','Преимущества',
+'Ограничения','Возможные риски','Распространённые ошибки',
+'Сравнение вариантов','Ключевые показатели','Интересные детали',
+'Альтернативные подходы','Способы решения',
+'Практические рекомендации','План действий',
+'Как проверить результат','Перспективы развития',
+'Вопросы для обсуждения','Что важно запомнить',
+'Выводы','Следующие шаги'
+];
+
+let slides=[];
+
+function draft(topic,count){
+ const result=[{
+ title:topic,
+ bullets:['Тема презентации: '+topic,'Краткий обзор основных вопросов']
+ }];
+ for(let i=1;i<count-1;i++){
+ result.push({
+ title:topics[i-1],
+ bullets:[
+ 'Добавь проверенные сведения по этой теме',
+ 'Приведи пример или пояснение',
+ 'Сформулируй основную мысль'
+ ]
+ });
+ }
+ result.push({
+ title:'Спасибо за внимание!',
+ bullets:['Основные выводы','Вопросы аудитории']
+ });
+ return result;
+}
+
+function draw(){
+ const host=$('slides');
+ host.replaceChildren();
+ slides.forEach((s,i)=>{
+  const card=document.createElement('div');
+  card.className='slide';
+  const num=document.createElement('div');
+  num.className='num';
+  num.textContent='Слайд '+(i+1);
+  const title=document.createElement('input');
+  title.value=s.title;
+  title.addEventListener('input',()=>s.title=title.value);
+  const body=document.createElement('textarea');
+  body.value=s.bullets.join('\n');
+  body.addEventListener('input',()=>{
+   s.bullets=body.value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,6);
+  });
+  card.append(num,title,body);
+  host.append(card);
+ });
+ $('result').classList.remove('hide');
+}
+
+$('make').addEventListener('click',async()=>{
+ const topic=$('topic').value.trim();
+ const count=Number($('count').value);
+ if(topic.length<4){
+  $('status').textContent='Введите тему (минимум 4 символа).';
+  return;
+ }
+ if(!Number.isInteger(count)||count<5||count>30){
+  $('status').textContent='Выбери от 5 до 30 слайдов.';
+  return;
+ }
+ const btn=$('make');
+ btn.disabled=true;
+ $('status').textContent='Создаём слайды…';
+ try{
+  const worker=$('worker').value.trim();
+  const pwd=$('password').value;
+  if(worker){
+   const url=new URL(worker);
+   if(url.protocol!=='https:'||!pwd){
+    throw Error('Укажи HTTPS-адрес и пароль Worker.');
+   }
+   const ctl=new AbortController();
+   const timer=setTimeout(()=>ctl.abort(),140000);
+   let response;
+   try{
+    response=await fetch(url.origin+'/generate',{
+     method:'POST',
+     headers:{
+      'Content-Type':'application/json',
+      'X-App-Password':pwd
+     },
+     body:JSON.stringify({
+      topic,count,audience:'general',tone:'clear'
+     }),
+     signal:ctl.signal
+    });
+   }finally{clearTimeout(timer);}
+   const data=await response.json();
+   if(!response.ok)throw Error(data.detail||'Ошибка ИИ');
+   if(!Array.isArray(data.slides)||data.slides.length!==count){
+    throw Error('ИИ вернул неправильное число слайдов.');
+   }
+   slides=data.slides.map((s,i)=>({
+    title:String(s.title||'Слайд '+(i+1)).slice(0,150),
+    bullets:(Array.isArray(s.bullets)?s.bullets:[]).map(String).slice(0,6)
+   }));
+   $('status').textContent='ИИ подготовил слайды. Проверь содержание.';
+  }else{
+   slides=draft(topic,count);
+   $('status').textContent='Черновик готов. Содержание можно редактировать.';
+  }
+  draw();
+ }catch(err){
+  $('status').textContent='Ошибка: '+err.message;
+ }finally{btn.disabled=false;}
+});
+
+$('download').addEventListener('click',async()=>{
+ if(!slides.length)return;
+ if(typeof PptxGenJS!=='function'){
+  $('status').textContent='Не загрузилась библиотека PowerPoint. Проверь интернет.';
+  return;
+ }
+ const btn=$('download');
+ btn.disabled=true;
+ $('status').textContent='Создаём PowerPoint…';
+ try{
+  const pptx=new PptxGenJS();
+  pptx.layout='LAYOUT_WIDE';
+  pptx.author='СлайдЛаб';
+  const dark=$('theme').value==='night';
+  const bg=dark?'0B0B0D':'FCFCFC';
+  const fg=dark?'F5F5F5':'171717';
+  const sub=dark?'B0B0B0':'595959';
+
+  slides.forEach((s,i)=>{
+   const slide=pptx.addSlide();
+   slide.background={color:bg};
+   slide.addText(s.title||'Слайд '+(i+1),{
+    x:.75,y:.7,w:11.9,h:1.1,
+    fontSize:i===0?36:29,bold:true,
+    color:fg,margin:0
+   });
+   let y=i===0?2.5:2;
+   for(const bullet of s.bullets.slice(0,6)){
+    slide.addText('• '+bullet.slice(0,180),{
+     x:.9,y,w:11.45,h:.64,
+     fontSize:18,color:sub,margin:0,valign:'mid'
+    });
+    y+=.75;
+   }
+   slide.addText((i+1)+' / '+slides.length,{
+    x:11.8,y:7.05,w:.7,h:.2,
+    color:sub,fontSize:9,align:'right',margin:0
+   });
+  });
+  await pptx.writeFile({fileName:'SlaydLab.pptx'});
+  $('status').textContent='Файл отправлен на скачивание.';
+ }catch(err){
+  $('status').textContent='Ошибка экспорта: '+err.message;
+ }finally{btn.disabled=false;}
+});
+</script>
+</body>
+</html>
